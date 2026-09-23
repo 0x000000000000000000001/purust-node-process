@@ -13,9 +13,14 @@ package:
   test:
     main: Test.Main
     dependencies:
+      - aff
       - assert
       - console
+      - refs
 workspace:
+  backend:
+    cmd: ../purust/bin/purust
+    args: [--main, Test.Main, --source, output, --out, output/purust_output, --threaded]
   packageSet:
     registry: 77.7.0
   extraPackages:
@@ -23,6 +28,8 @@ workspace:
       path: "../purust-aff"
     argonaut-core:
       path: "../purust-argonaut-core"
+    arraybuffer-types:
+      path: "../purust-arraybuffer-types"
     arrays:
       path: "../purust-arrays"
     assert:
@@ -59,6 +66,8 @@ workspace:
       path: "../purust-js-uri"
     lazy:
       path: "../purust-lazy"
+    node-buffer:
+      path: "../purust-node-buffer"
     node-event-emitter:
       path: "../purust-node-event-emitter"
     node-fs:

@@ -34,11 +34,6 @@ fn effect(build: impl Fn() -> crate::UnknownType + 'static) -> crate::UnknownTyp
     crate::Value::Func1(purust_core::Func1::Shared(Rc::new(move |_| build())))
 }
 
-/// Effect with an `a` result: `exit :: forall a. Effect a`.
-fn effect_value(value: crate::UnknownType) -> crate::UnknownType {
-    crate::Value::Func1(purust_core::Func1::Static(move |_| value.clone()))
-}
-
 fn effect_string(text: String) -> crate::UnknownType {
     effect(move || string(&text))
 }
@@ -339,11 +334,11 @@ pub fn Node_Process_setUncaughtExceptionCaptureCallbackImpl() -> crate::UnknownT
 }
 
 pub fn Node_Process_clearUncaughtExceptionCaptureCallback() -> crate::UnknownType {
-    effect_value(crate::Value::Func1(purust_core::Func1::Static(|_| {
+    effect(move || {
         *UNCAUGHT_CALLBACK.lock().unwrap() = None;
         HAS_UNCAUGHT_CALLBACK.store(false, Ordering::SeqCst);
         crate::Value::Unit
-    })))
+    })
 }
 
 pub fn Node_Process_nextTickImpl() -> crate::UnknownType {
@@ -630,10 +625,9 @@ pub fn Node_Process_cpuUsage() -> crate::UnknownType {
 pub fn Node_Process_cpuUsageDiffImpl() -> crate::UnknownType {
     crate::Value::Func1(purust_core::Func1::Shared(Rc::new(|previous| {
         let (user, system) = current_cpu_usage();
-        let fields = previous.__purust_record_fields().unwrap_or_default();
         let peek = |name: &str| {
-            fields
-                .get(name)
+            previous
+                .__purust_get_field(name)
                 .map(|value| value.unwrap_int())
                 .unwrap_or(0)
         };
