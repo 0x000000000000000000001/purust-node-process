@@ -65,4 +65,37 @@ if ! grep -q 'Tests passed' output/actual.stdout; then
   echo "[FAILED] Node.Process tests did not reach the final marker" >&2
   exit 1
 fi
-echo "Summary: the native Node.Process tests passed."
+
+# Lifecycle scenarios run as subprocesses, so exit codes and termination are
+# observed for real. `run_child NAME EXPECTED_STATUS [EXPECTED_MARKER] ARGS...`
+run_child() {
+  local name="$1" expected_status="$2" expected_marker="$3"
+  shift 3
+  echo "=== $name ==="
+  local child_status=0
+  node -e 'const { spawnSync } = require("node:child_process"); const result = spawnSync(process.argv[1], process.argv.slice(2), { stdio: "inherit", timeout: 60000 }); if (result.error) console.error(result.error.message); process.exit(result.status ?? 1);' "$BINARY" "$@" > output/child.stdout 2> output/child.stderr || child_status=$?
+  cat output/child.stdout
+  if [ "$child_status" -ne "$expected_status" ]; then
+    cat output/child.stderr >&2
+    echo "[FAILED] $name exited with status $child_status (expected $expected_status)" >&2
+    exit 1
+  fi
+  if [ -n "$expected_marker" ] && ! grep -qF "$expected_marker" output/child.stdout; then
+    cat output/child.stdout >&2
+    echo "[FAILED] $name did not print '$expected_marker'" >&2
+    exit 1
+  fi
+}
+
+run_child "exit event and code" 42 "exit-event: 42" --child-exit
+run_child "natural exit code" 7 "natural-exit" --child-set-exit-code
+run_child "uncaught exception capture" 7 "capture: uncaught" --child-capture
+echo "=== uncaught exception without capture ==="
+throw_status=0
+node -e 'const { spawnSync } = require("node:child_process"); const result = spawnSync(process.argv[1], process.argv.slice(2), { stdio: "inherit", timeout: 60000 }); if (result.error) console.error(result.error.message); process.exit(result.status ?? 1);' "$BINARY" --child-throw > output/child.stdout 2> output/child.stderr || throw_status=$?
+if [ "$throw_status" -eq 0 ] || grep -q 'Tests passed' output/child.stdout; then
+  echo "[FAILED] an uncaught exception must fail the process (status $throw_status)" >&2
+  exit 1
+fi
+
+echo "Summary: the native Node.Process tests passed (suite, nextTick, IPC guarantees, exit statuses and uncaught exceptions)."

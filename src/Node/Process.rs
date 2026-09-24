@@ -2,7 +2,7 @@
 // streams and process lifetime. Values come from `std`/libc so observable
 // behaviour matches the JavaScript FFI this package replaces on Unix.
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use Purs_Node_EventEmitter::{purust_emitter_box, purust_emitter_emit, EventEmitter};
@@ -11,11 +11,6 @@ use Purs_Node_EventEmitter::{purust_emitter_box, purust_emitter_emit, EventEmitt
 /// like in Node; native state lives in the emitter's user data / statics.
 pub type Process = EventEmitter;
 
-/// `getExitCode` returns `null` until an exit code has been set, so an
-/// impossible exit status doubles as the unset marker.
-const EXIT_CODE_UNSET: i64 = i64::MIN;
-
-static EXIT_CODE: AtomicI64 = AtomicI64::new(EXIT_CODE_UNSET);
 static HAS_UNCAUGHT_CALLBACK: AtomicBool = AtomicBool::new(false);
 static UNCAUGHT_CALLBACK: Mutex<Option<crate::UnknownType>> = Mutex::new(None);
 static TITLE: Mutex<Option<String>> = Mutex::new(None);
@@ -90,8 +85,7 @@ fn process_emitter() -> Rc<EventEmitter> {
 }
 
 fn exit_code() -> i64 {
-    let code = EXIT_CODE.load(Ordering::SeqCst);
-    if code == EXIT_CODE_UNSET { 0 } else { code }
+    purust_core::microtasks::exit_code().unwrap_or(0) as i64
 }
 
 fn terminate(code: i64) -> ! {
@@ -275,18 +269,17 @@ pub fn Node_Process_abortImpl() -> Rc<Purs_Data_Nullable::Nullable> {
 
 pub fn Node_Process_setExitCodeImpl() -> crate::UnknownType {
     crate::Value::Func1(purust_core::Func1::Shared(Rc::new(|code| {
-        EXIT_CODE.store(code.unwrap_int(), Ordering::SeqCst);
+        // The runtime honours this when the program finishes on its own.
+        purust_core::microtasks::set_exit_code(code.unwrap_int() as i32);
         crate::Value::Unit
     })))
 }
 
 pub fn Node_Process_getExitCodeImpl() -> crate::UnknownType {
     effect(move || {
-        let code = EXIT_CODE.load(Ordering::SeqCst);
-        crate::Value::Class(Rc::new(if code == EXIT_CODE_UNSET {
-            Purs_Data_Nullable::Data_Nullable_null()
-        } else {
-            Purs_Data_Nullable::Data_Nullable_notNull(crate::mk_int(code))
+        crate::Value::Class(Rc::new(match purust_core::microtasks::exit_code() {
+            None => Purs_Data_Nullable::Data_Nullable_null(),
+            Some(code) => Purs_Data_Nullable::Data_Nullable_notNull(crate::mk_int(code as i64)),
         }))
     })
 }
@@ -327,6 +320,13 @@ pub fn Node_Process_hasUncaughtExceptionCaptureCallback() -> crate::UnknownType 
 
 pub fn Node_Process_setUncaughtExceptionCaptureCallbackImpl() -> crate::UnknownType {
     crate::Value::Func1(purust_core::Func1::Shared(Rc::new(|callback| {
+        // The runtime calls this when an exception escapes the program.
+        purust_core::microtasks::set_uncaught_handler(Some(Box::new({
+            let callback = callback.clone();
+            move || {
+                callback.unwrap_func1()(crate::Value::Unit);
+            }
+        })));
         *UNCAUGHT_CALLBACK.lock().unwrap() = Some(callback);
         HAS_UNCAUGHT_CALLBACK.store(true, Ordering::SeqCst);
         crate::Value::Unit
@@ -335,6 +335,7 @@ pub fn Node_Process_setUncaughtExceptionCaptureCallbackImpl() -> crate::UnknownT
 
 pub fn Node_Process_clearUncaughtExceptionCaptureCallback() -> crate::UnknownType {
     effect(move || {
+        purust_core::microtasks::set_uncaught_handler(None);
         *UNCAUGHT_CALLBACK.lock().unwrap() = None;
         HAS_UNCAUGHT_CALLBACK.store(false, Ordering::SeqCst);
         crate::Value::Unit
