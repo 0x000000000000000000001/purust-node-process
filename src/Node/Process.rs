@@ -365,11 +365,17 @@ pub fn Node_Process_nextTickCbImpl() -> crate::UnknownType {
 
 pub fn Node_Process_argv() -> crate::UnknownType {
     effect(|| {
-        crate::mk_array(
-            std::env::args()
-                .map(|argument| string(&argument))
-                .collect(),
-        )
+        // Node's `process.argv` is `[execPath, scriptPath, ...arguments]`.
+        // Native binaries have no separate script path, so the executable
+        // occupies the first two entries and user arguments start at index 2,
+        // exactly like `node script.js ...`.
+        let mut arguments: Vec<crate::UnknownType> = Vec::new();
+        let mut raw = std::env::args();
+        let executable = raw.next().unwrap_or_default();
+        arguments.push(string(&executable));
+        arguments.push(string(&executable));
+        arguments.extend(raw.map(|argument| string(&argument)));
+        crate::mk_array(arguments)
     })
 }
 
